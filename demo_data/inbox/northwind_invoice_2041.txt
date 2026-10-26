@@ -1,0 +1,17 @@
+NORTHWIND TRADERS
+12 Harbour Road, Seattle WA
+
+                              INVOICE
+Invoice No: INV-2041
+Date: 19 Oct 2026
+Bill to: Acme Corp, Accounts Payable
+Your PO ref: PO-1003
+
+Description                          Qty    Unit      Line
+Ergonomic office chair (mesh)          8    155.00   1,240.00
+
+                                   Subtotal:  $1,240.00
+                                   Tax:           $0.00
+                                   TOTAL DUE: $1,240.00
+
+Payment terms: Net 30. Remit to ar@northwind.example

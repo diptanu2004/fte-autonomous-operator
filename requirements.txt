@@ -1,0 +1,8 @@
+openai>=1.40
+playwright>=1.45
+streamlit>=1.37
+flask>=3.0
+pyyaml>=6.0
+openpyxl>=3.1
+pypdf>=4.0
+pytest>=8.0

@@ -1,0 +1,124 @@
+# Machine-checkable structure of each procedure, keyed by handbook document name.
+#
+# work_items  glob in the workspace; each matching file is one item the operator must handle.
+# fields      regexes extracted from each item's text; usable as {name} in item steps ({id} is the item id).
+# lookups     values read from a system page after the operator opened it (same session, no navigation).
+# rules       deterministic business rules over fields/lookups ("when" is arithmetic) -> new fields.
+# item_steps  the per-item procedure as a checklist. Each step is ticked ONLY by observed evidence:
+#               read: true                   the item file was read
+#               visited: "<path template>"   the browser loaded that page this run
+#               confirmed: true              a submit's confirmation message named the item id
+#               emailed: true                an outbox email mentions the item id
+#               email_mentions: [templates]  an outbox email contains all of these
+#               displayed_row: [templates]   a row the system DISPLAYED has a cell equal to each value
+#               file_glob: "<glob>"          a workspace file matches
+# subject / items_from_table / steps_before_items / steps_after_items: for requests whose items come from the
+#             request itself (e.g. onboarding) rather than from files.
+#             applies_if: {confirmation_contains: "..."} limits a step to items whose confirmation matches.
+#             The operator is always told the first unticked step of the first unfinished item.
+# checks      run in code during verification (and before finish is accepted):
+#               item_steps_done, item_ids_on_page {url}, item_row_contains {url, fields},
+#               file_exists {path, must_contain_item_ids}, files_match {glob, min}
+
+ap_invoice_processing:
+  work_items: "inbox/*"
+  fields:
+    id: "INV-\\d{3,6}"
+    po: "PO-\\d{4}"
+    total: "(?i)total[^\\d\\n]*?([\\d,]+\\.\\d{2})"   # printed total, or the computed column total for CSVs
+  # Values read from a system page once the operator has opened it (same session, no navigation).
+  # A regex may reference earlier fields as {name} (inserted literally, regex-escaped).
+  lookups:
+    - field: po_amount
+      url: "http://127.0.0.1:5055/purchase-orders/{po}"
+      regex: "Approved amount \\(USD\\)\\s*(?:<[^>]+>\\s*)*([\\d,]+\\.\\d{2})"
+    - field: vendor_id
+      url: "http://127.0.0.1:5055/purchase-orders/{po}"
+      regex: "Vendor\\s*(?:<[^>]+>\\s*)*[^<(]*\\((V-\\d+)\\)"
+    - field: vendor_email
+      url: "http://127.0.0.1:5055/vendors"
+      regex: "{vendor_id}\\s*(?:<[^>]+>\\s*)*[^<]*(?:<[^>]+>\\s*)+([^<\\s]+@[^<\\s]+)"
+  # Deterministic business rules: computed in code once their inputs are known, shown to the operator as
+  # facts, and enforced by the checks below. The model does the unstructured work around them.
+  rules:
+    - field: status
+      when: "abs(total - po_amount) / po_amount * 100 <= 2"
+      then: "Approved for payment"
+      else: "On hold"
+    - field: note
+      when: "abs(total - po_amount) / po_amount * 100 <= 2"
+      then: "Matched PO {po}"
+      else: "Amount mismatch: invoice {total} vs PO {po_amount}"
+  # Irreversible submits are checked BEFORE they happen: a form about an item (matched by item_field) must
+  # carry the expected values. The portal has no edit/undo, so prevention beats detection.
+  submit_guard:
+    item_field: invoice_number
+    expect: {amount: total, status: status}
+  # An email about an item (mentions its id) must go to the looked-up address.
+  email_guard:
+    expect_to: vendor_email
+  item_steps:
+    - do: "read_file the invoice file {item}"
+      done_when: {read: true}
+    - do: "browser_open http://127.0.0.1:5055/purchase-orders/{po} to review the PO (vendor, approved amount)"
+      done_when: {visited: "/purchase-orders/{po}"}
+    - do: "browser_open http://127.0.0.1:5055/invoices/new, then ONE browser_fill with ALL fields for {id}: amount {total}, status '{status}', notes '{note}' (rule: invoice total {total} vs PO {po_amount}, 2% tolerance), and submit_id of 'Save invoice'"
+      done_when: {confirmed: true}
+    - do: "browser_open http://127.0.0.1:5055/vendors to find the billing contact of vendor {vendor_id}"
+      applies_if: {confirmation_contains: "On hold"}
+      done_when: {visited: "/vendors"}
+    - do: "send_email to '{vendor_email}' (billing contact of {vendor_id}) using the 'Invoice on hold' template for {id} (invoice {total} vs PO {po_amount})"
+      applies_if: {confirmation_contains: "On hold"}
+      done_when: {emailed: true}
+  checks:
+    - type: item_steps_done
+      description: "Every inbox invoice went through every applicable procedure step"
+    - type: item_ids_on_page
+      url: "http://127.0.0.1:5055/invoices"
+      description: "Every inbox invoice number is listed on the portal Invoices page"
+    - type: item_row_contains
+      url: "http://127.0.0.1:5055/invoices"
+      fields: [total, status]
+      description: "Each invoice was recorded with its document total and the status the 2% match rule requires"
+    - type: file_exists
+      path: "reports/ap_summary.md"
+      must_contain_item_ids: true
+
+employee_onboarding:
+  # Facts about the subject of the request, read from the request text plus the requester's clarifications.
+  # Dates (YYYY-MM-DD) also yield <name>_days = days from today.
+  subject:
+    name: "(?i:onboard|set up|welcome)\\s+([A-Z][a-z]+ [A-Z][a-z]+)"
+    manager: "\\b(?:in|reporting to|reports to)\\s+([A-Z][a-z]+ [A-Z][a-z]+)"
+    start: "(\\d{4}-\\d{2}-\\d{2})"
+    first: "(?i:onboard|set up|welcome)\\s+([A-Z][a-z]+) [A-Z][a-z]+"
+    last: "(?i:onboard|set up|welcome)\\s+[A-Z][a-z]+ ([A-Z][a-z]+)"
+  derived:   # SOP formatting rules as templates (lowercased)
+    work_email: "{first}.{last}@acme-corp.com"
+  rules:
+    - field: priority
+      when: "start_days <= 7"
+      then: "High"
+      else: "Normal"
+  # Work items from a table in the procedure: the row whose match column appears in the request.
+  items_from_table:
+    doc: employee_onboarding
+    section: "Equipment matrix"
+    match_column: "Role contains"
+    items:
+      - {column: "Laptop (Hardware ticket item)", category: "Hardware"}
+      - {column: "Software access tickets", category: "Software access", split: ";"}
+  steps_before_items:
+    - do: "Create the employee {name} (Employees → Add employee): work email '{work_email}', manager {manager}, start date {start}; location = the manager's location (Employees page) unless the requester gave one"
+      done_when: {displayed_row: ["{name}", "{work_email}", "{manager}", "{start}"]}
+  item_steps:
+    - do: "browser_open http://127.0.0.1:5055/tickets/new, then ONE browser_fill: Category '{category}', For employee '{name}', Item '{item}' (exactly this text — one ticket per item, never combine), Priority '{priority}', and submit_id of 'Open ticket'"
+      done_when: {displayed_row: ["{category}", "{name}", "{item}"]}
+  steps_after_items:
+    - do: "send_email to the manager {manager} (address on the Employees page) using the 'New hire welcome' template for {name}"
+      done_when: {email_mentions: ["{name}", "acme-corp.com"]}
+    - do: "write_file reports/onboarding_<firstname>_<lastname>.md (lowercase) with the onboarding checklist for {name}"
+      done_when: {file_glob: "reports/onboarding_*.md"}
+  checks:
+    - type: item_steps_done
+      description: "Employee created, one ticket per equipment-matrix item, manager emailed, checklist saved"

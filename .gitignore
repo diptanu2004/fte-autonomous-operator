@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+workspace/
+runs/
+memory/
+demo_portal/portal.db
+.streamlit/secrets.toml

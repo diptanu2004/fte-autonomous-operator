@@ -1,0 +1,26 @@
+# Systems the operator may use. The LLM sees names, URLs and secret *names* — never secret values.
+company:
+  name: Acme Corp
+  internal_email_domain: acme-corp.com
+  timezone: Asia/Kolkata
+
+systems:
+  - name: acme_portal
+    kind: web
+    url: http://127.0.0.1:5055
+    description: Purchasing, invoices (accounts payable), vendors, employees (HR) and IT tickets.
+    login:
+      url: http://127.0.0.1:5055/login
+      username_secret: portal_username
+      password_secret: portal_password
+
+  - name: workspace
+    kind: files
+    description: >
+      Shared drive (files, NOT web pages — use list_files / read_file / write_file). inbox/ holds incoming
+      documents (e.g. vendor invoices), reports/ is where summaries go, outbox/ holds sent email copies.
+
+# Secret values. Environment variables FTE_SECRET_<NAME> override these (e.g. FTE_SECRET_PORTAL_PASSWORD).
+secrets:
+  portal_username: ops.agent
+  portal_password: "Acme!2026"
